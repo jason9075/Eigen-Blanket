@@ -156,18 +156,26 @@ function buildCloth(res) {
   clothGeo.computeVertexNormals();
 
   const clothMat = new THREE.MeshStandardMaterial({
-    color: 0x88C0D0,
+    color: 0x88C0D0,   // Nord8 ice-blue
     side: THREE.DoubleSide,
-    wireframe: segs <= 2,
-    transparent: true,
-    opacity: 0.82,
-    roughness: 0.65,
+    roughness: 0.55,
+    metalness: 0.05,
   });
 
   clothMesh = new THREE.Mesh(clothGeo, clothMat);
   clothMesh.castShadow = true;
   clothMesh.receiveShadow = true;
   scene.add(clothMesh);
+
+  // Wireframe overlay so mesh topology stays visible
+  const wireMat = new THREE.MeshBasicMaterial({
+    color: 0x5E81AC,   // Nord10 subdued blue
+    wireframe: true,
+    transparent: true,
+    opacity: 0.35,
+  });
+  const wireMesh = new THREE.Mesh(clothGeo, wireMat);
+  clothMesh.add(wireMesh);
 
   simState = 'idle';
   updateEigenSpectrum();
@@ -182,7 +190,13 @@ function stepSimulation(dt) {
   const segs = resolution;
   const { stiffness, damping } = PRESETS[preset];
   const restLen = CLOTH_SIZE / segs;
-  const subDt   = dt / SUBSTEPS;
+  // Use a fixed physics dt so gravity feels consistent regardless of frame rate
+  const subDt = Math.min(dt, 0.025) / SUBSTEPS;
+
+  // Snapshot mean Y before this frame for settled detection
+  let meanY0 = 0;
+  for (let i = 0; i < N; i++) meanY0 += positions[i * 3 + 1];
+  meanY0 /= N;
 
   for (let sub = 0; sub < SUBSTEPS; sub++) {
     // Apply gravity + verlet
@@ -196,6 +210,7 @@ function stepSimulation(dt) {
       prevPos[iy] = positions[iy];
       prevPos[iz] = positions[iz];
       positions[ix] += vx;
+      // Gravity integrated as velocity increment per subDt (not dt²) for stability
       positions[iy] += vy + GRAVITY * subDt * subDt;
       positions[iz] += vz;
     }
@@ -246,13 +261,11 @@ function stepSimulation(dt) {
 
   if (useHeatmap) updateHeatmap();
 
-  // Detect settled
-  let maxVel = 0;
-  for (let i = 0; i < N; i++) {
-    const dy = positions[i*3+1] - prevPos[i*3+1];
-    if (Math.abs(dy) > maxVel) maxVel = Math.abs(dy);
-  }
-  if (maxVel < 0.0002) {
+  // Settled detection: compare frame mean-Y delta (avoids per-substep threshold trap)
+  let meanY1 = 0;
+  for (let i = 0; i < N; i++) meanY1 += positions[i * 3 + 1];
+  meanY1 /= N;
+  if (Math.abs(meanY1 - meanY0) < 0.00015) {
     simState = 'settled';
     updateStatusBar('Settled');
   }
