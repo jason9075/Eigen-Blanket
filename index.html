@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Eigen-Blanket | gfx-lab</title>
+
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {
+            delimiters: [
+              {left: '$$', right: '$$', display: true},
+              {left: '$', right: '$', display: false}
+            ]
+          });"></script>
+
+  <!-- Prism.js (Nord theme) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prism-themes@1.9.0/themes/prism-nord.css" />
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-javascript.min.js"></script>
+
+  <!-- Three.js Import Maps -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <style>
+    :root {
+      --nord0:  #2E3440;
+      --nord1:  #3B4252;
+      --nord2:  #434C5E;
+      --nord3:  #4C566A;
+      --nord4:  #D8DEE9;
+      --nord5:  #E5E9F0;
+      --nord6:  #ECEFF4;
+      --nord7:  #8FBCBB;
+      --nord8:  #88C0D0;
+      --nord9:  #81A1C1;
+      --nord10: #5E81AC;
+      --nord11: #BF616A;
+      --nord12: #D08770;
+      --nord13: #EBCB8B;
+      --nord14: #A3BE8C;
+      --nord15: #B48EAD;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: var(--nord0);
+      color: var(--nord4);
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    #header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.55rem 1.25rem;
+      background: rgba(59,66,82,0.92);
+      border-bottom: 1px solid var(--nord3);
+      flex-shrink: 0;
+      z-index: 10;
+    }
+    #header h1 { font-size: 0.9rem; color: var(--nord8); letter-spacing: 0.06em; }
+    #header span { font-size: 0.75rem; color: var(--nord3); }
+
+    /* ── Main layout ── */
+    #main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Canvas area ── */
+    #viewport {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    #viewport canvas { display: block; width: 100% !important; height: 100% !important; }
+
+    /* ── Right panel ── */
+    #panel {
+      width: 230px;
+      flex-shrink: 0;
+      background: rgba(59,66,82,0.88);
+      backdrop-filter: blur(12px);
+      border-left: 1px solid var(--nord3);
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      overflow-y: auto;
+    }
+
+    .panel-section {
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid var(--nord3);
+    }
+    .panel-section h3 {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--nord3);
+      margin-bottom: 0.65rem;
+    }
+
+    /* Segmented control */
+    .seg-ctrl {
+      display: flex;
+      border: 1px solid var(--nord3);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .seg-ctrl button {
+      flex: 1;
+      padding: 0.35rem 0;
+      font: inherit;
+      font-size: 0.75rem;
+      background: transparent;
+      border: none;
+      color: var(--nord4);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .seg-ctrl button + button { border-left: 1px solid var(--nord3); }
+    .seg-ctrl button.active {
+      background: var(--nord9);
+      color: var(--nord0);
+      font-weight: 700;
+    }
+
+    /* Preset buttons */
+    .preset-group {
+      display: flex;
+      gap: 0.4rem;
+    }
+    .preset-btn {
+      flex: 1;
+      padding: 0.4rem 0;
+      font: inherit;
+      font-size: 0.72rem;
+      background: var(--nord2);
+      border: 1px solid var(--nord3);
+      border-radius: 6px;
+      color: var(--nord5);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .preset-btn:hover { background: var(--nord3); }
+    .preset-btn.active { background: var(--nord9); color: var(--nord0); border-color: var(--nord9); }
+
+    /* Action buttons */
+    .action-btn {
+      display: block;
+      width: 100%;
+      padding: 0.5rem;
+      font: inherit;
+      font-size: 0.8rem;
+      border-radius: 8px;
+      border: 1px solid var(--nord3);
+      cursor: pointer;
+      margin-bottom: 0.45rem;
+      transition: background 0.15s, transform 0.08s;
+    }
+    .action-btn:last-child { margin-bottom: 0; }
+    .action-btn:active { transform: scale(0.97); }
+
+    #btn-reset  { background: var(--nord2); color: var(--nord5); }
+    #btn-reset:hover { background: var(--nord3); }
+    #btn-drop   { background: var(--nord10); color: var(--nord6); border-color: var(--nord10); }
+    #btn-drop:hover { background: var(--nord9); }
+    #btn-jitter {
+      background: var(--nord12);
+      color: var(--nord0);
+      border-color: var(--nord12);
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+    #btn-jitter:hover { background: #e09a7a; }
+
+    /* Heatmap toggle */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.78rem;
+      color: var(--nord4);
+    }
+    .toggle-switch {
+      position: relative;
+      width: 36px;
+      height: 20px;
+    }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: var(--nord3);
+      border-radius: 20px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .toggle-track::after {
+      content: '';
+      position: absolute;
+      top: 3px; left: 3px;
+      width: 14px; height: 14px;
+      background: var(--nord6);
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle-switch input:checked + .toggle-track { background: var(--nord14); }
+    .toggle-switch input:checked + .toggle-track::after { transform: translateX(16px); }
+
+    /* Math monitor */
+    .monitor-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.72rem;
+      color: var(--nord4);
+      margin-bottom: 0.3rem;
+    }
+    .monitor-row span:last-child { color: var(--nord8); }
+
+    /* Eigen spectrum chart */
+    #spectrum-chart {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 50px;
+      margin-top: 0.5rem;
+    }
+    .eigen-bar {
+      flex: 1;
+      background: var(--nord9);
+      border-radius: 2px 2px 0 0;
+      transition: height 0.4s ease;
+      min-height: 2px;
+    }
+
+    /* Status bar */
+    #statusbar {
+      flex-shrink: 0;
+      padding: 0.4rem 1.25rem;
+      background: rgba(46,52,64,0.96);
+      border-top: 1px solid var(--nord3);
+      font-size: 0.7rem;
+      color: var(--nord3);
+      display: flex;
+      gap: 1.5rem;
+    }
+    #statusbar span { color: var(--nord8); }
+
+    /* 💡 Math modal trigger */
+    #open-math {
+      position: fixed;
+      bottom: 2.5rem;
+      right: 0.75rem;
+      width: 2.4rem;
+      height: 2.4rem;
+      font-size: 1.2rem;
+      background: rgba(59,66,82,0.9);
+      border: 1px solid var(--nord3);
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      z-index: 30;
+      transition: background 0.15s;
+    }
+    #open-math:hover { background: var(--nord2); }
+
+    /* Modal */
+    #math-modal[hidden] { display: none; }
+    #math-modal {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(46,52,64,0.8);
+      z-index: 50;
+    }
+    .modal-panel {
+      width: min(740px, calc(100vw - 2rem));
+      max-height: calc(100vh - 2rem);
+      overflow-y: auto;
+      background: var(--nord1);
+      border: 1px solid var(--nord3);
+      border-radius: 18px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.4);
+      padding: 1.5rem;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.1rem;
+    }
+    .modal-header h2 { font-size: 1rem; color: var(--nord8); }
+    .modal-actions { display: flex; gap: 0.5rem; }
+    .modal-btn {
+      font: inherit;
+      font-size: 0.78rem;
+      padding: 0.35rem 0.8rem;
+      border: 1px solid var(--nord3);
+      border-radius: 999px;
+      background: var(--nord2);
+      color: var(--nord5);
+      cursor: pointer;
+    }
+    .modal-btn:hover { background: var(--nord3); }
+    .modal-body {
+      display: grid;
+      gap: 0.85rem;
+      line-height: 1.75;
+      color: var(--nord5);
+      font-size: 0.88rem;
+    }
+    .modal-body pre[class*="language-"] {
+      border-radius: 8px;
+      font-size: 0.8rem;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <header id="header">
+    <h1>gfx-lab // Eigen-Physics Study</h1>
+    <span>Three.js + Cloth Simulation + Eigenvalue Decomposition</span>
+    <a href="https://github.com/YOUR_USERNAME/Eigen-Blanket" target="_blank" rel="noopener"
+       style="color:var(--nord8);font-size:0.8rem;text-decoration:none;">GitHub ↗</a>
+  </header>
+
+  <div id="main">
+    <div id="viewport">
+      <canvas id="canvas"></canvas>
+    </div>
+
+    <aside id="panel">
+      <!-- Topology -->
+      <div class="panel-section">
+        <h3>Topology</h3>
+        <div class="seg-ctrl" id="res-ctrl">
+          <button data-res="1"  class="active">1×1</button>
+          <button data-res="2" >2×2</button>
+          <button data-res="4" >4×4</button>
+          <button data-res="9" >9×9</button>
+          <button data-res="19">19×19</button>
+        </div>
+      </div>
+
+      <!-- Material Preset -->
+      <div class="panel-section">
+        <h3>Material Preset</h3>
+        <div class="preset-group">
+          <button class="preset-btn active" data-preset="soft">Soft</button>
+          <button class="preset-btn" data-preset="medium">Medium</button>
+          <button class="preset-btn" data-preset="stiff">Stiff</button>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="panel-section">
+        <h3>Experiment Actions</h3>
+        <button id="btn-reset"  class="action-btn" type="button">Reset</button>
+        <button id="btn-drop"   class="action-btn" type="button">Drop</button>
+        <button id="btn-jitter" class="action-btn" type="button">⚡ Jitter / Impulse</button>
+      </div>
+
+      <!-- Heatmap -->
+      <div class="panel-section">
+        <h3>Visualisation</h3>
+        <div class="toggle-row">
+          <span>Stress Heatmap</span>
+          <label class="toggle-switch">
+            <input type="checkbox" id="heatmap-toggle" />
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Math Monitor -->
+      <div class="panel-section">
+        <h3>Math Monitor</h3>
+        <div class="monitor-row">
+          <span>Vertices (N)</span><span id="stat-verts">—</span>
+        </div>
+        <div class="monitor-row">
+          <span>Matrix dim</span><span id="stat-dim">—</span>
+        </div>
+        <div class="monitor-row">
+          <span>Sim FPS</span><span id="stat-fps">—</span>
+        </div>
+        <div class="monitor-row" style="margin-top:0.6rem">
+          <span style="font-size:0.68rem;color:var(--nord3)">Eigen-Spectrum (top 10)</span>
+        </div>
+        <div id="spectrum-chart">
+          <!-- bars injected by JS -->
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Status bar -->
+  <footer id="statusbar">
+    <span>N=<span id="sb-verts">0</span> Vertices</span>
+    <span>Simulation: <span id="sb-fps">0</span> FPS</span>
+    <span id="sb-state">State: Idle</span>
+  </footer>
+
+  <!-- 💡 Math explanation button -->
+  <button id="open-math" type="button" aria-haspopup="dialog" aria-controls="math-modal" aria-label="Explain the math">💡</button>
+
+  <!-- Math modal -->
+  <div id="math-modal" role="dialog" aria-modal="true" aria-labelledby="math-title" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2 id="math-title">Math Behind the Scene</h2>
+        <div class="modal-actions">
+          <button id="language-toggle" class="modal-btn" type="button">Eng/中</button>
+          <button id="close-math"      class="modal-btn" type="button">Close</button>
+        </div>
+      </div>
+      <div id="math-content" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
