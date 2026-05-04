@@ -18,6 +18,11 @@ const closeMath      = document.getElementById('close-math');
 const langToggle     = document.getElementById('language-toggle');
 const mathModal      = document.getElementById('math-modal');
 const mathContent    = document.getElementById('math-content');
+const openVerlet      = document.getElementById('open-verlet');
+const closeVerlet     = document.getElementById('close-verlet');
+const verletPopup     = document.getElementById('verlet-popup');
+const verletViewBody  = document.getElementById('verlet-view-body');
+const verletPopupMeta = document.getElementById('verlet-popup-meta');
 const openEigen      = document.getElementById('open-eigen');
 const closeEigen     = document.getElementById('close-eigen');
 const eigenPopup     = document.getElementById('eigen-popup');
@@ -113,9 +118,14 @@ let modalLang    = 'en';
 let eigenView    = 'k-matrix';
 let eigenVecDir  = 'x';
 
+// Verlet popup state
+let verletFrame = 0;
+let verletSnap  = null;
+
 // Cloth data arrays (rebuilt on resolution change)
-let positions    = null;   // Float32Array [x,y,z, ...]
-let prevPos      = null;
+let positions     = null;   // Float32Array [x,y,z, ...]
+let prevPos       = null;
+let framePrevPos  = null;   // positions captured at frame start (for Verlet display)
 let pinned       = null;   // Boolean[]
 let clothGeo     = null;
 let clothMesh    = null;
@@ -140,9 +150,10 @@ function buildCloth(res) {
     clothMesh.material.dispose();
   }
 
-  positions = new Float32Array(N * 3);
-  prevPos   = new Float32Array(N * 3);
-  pinned    = new Array(N).fill(false);
+  positions    = new Float32Array(N * 3);
+  prevPos      = new Float32Array(N * 3);
+  framePrevPos = new Float32Array(N * 3);
+  pinned       = new Array(N).fill(false);
 
   const step = CLOTH_SIZE / segs;
   const ox   = -CLOTH_SIZE / 2;
@@ -228,6 +239,22 @@ function buildCloth(res) {
 }
 
 // ── Verlet integration step ───────────────────────────────────────────────────
+function updateDropBtn() {
+  if (simState === 'falling') {
+    btnDrop.textContent = 'Pause';
+    btnDrop.style.background = 'var(--nord12)';
+    btnDrop.style.borderColor = 'var(--nord12)';
+  } else if (simState === 'paused') {
+    btnDrop.textContent = 'Resume';
+    btnDrop.style.background = 'var(--nord9)';
+    btnDrop.style.borderColor = 'var(--nord9)';
+  } else {
+    btnDrop.textContent = 'Drop';
+    btnDrop.style.background = 'var(--nord10)';
+    btnDrop.style.borderColor = 'var(--nord10)';
+  }
+}
+
 function stepSimulation(dt) {
   if (simState !== 'falling') return;
 
@@ -330,6 +357,7 @@ function stepSimulation(dt) {
   if (meanY1 < CLOTH_Y0 - 1.0 && Math.abs(meanY1 - meanY0) < 0.00015) {
     simState = 'settled';
     updateStatusBar('Settled');
+    updateDropBtn();
   }
 }
 
@@ -508,18 +536,27 @@ presetBtns.forEach(btn => {
 
 btnReset.addEventListener('click', () => {
   buildCloth(resolution);
+  updateDropBtn();
 });
 
 btnDrop.addEventListener('click', () => {
-  if (simState === 'idle') {
+  if (simState === 'idle' || simState === 'settled') {
+    simState = 'falling';
+    updateStatusBar('Falling…');
+  } else if (simState === 'falling') {
+    simState = 'paused';
+    updateStatusBar('Paused');
+  } else if (simState === 'paused') {
     simState = 'falling';
     updateStatusBar('Falling…');
   }
+  updateDropBtn();
 });
 
 btnJitter.addEventListener('click', () => {
   if (!positions) return;
   simState = 'falling';
+  updateDropBtn();
   // Impulse: push sphere up slightly, ripple cloth
   sphere.position.y += 0.35;
   setTimeout(() => { sphere.position.y = SPHERE_RADIUS; }, 120);
@@ -562,6 +599,41 @@ positions[i].y += gravity * dt²;</code></pre>
       <li><strong>Damping</strong> — Velocity retention per step ($0{-}1$). At 1.0 the cloth oscillates indefinitely, exposing individual eigenmodes as standing waves. Lower values dissipate energy faster; below ≈ 0.90 oscillations collapse within a few frames.</li>
       <li><strong>Shear Ratio</strong> — Stiffness multiplier for diagonal springs relative to structural springs. At 0 the cloth has no shear resistance and collapses like a loose net; at 1 diagonal and structural springs are equally stiff. Intermediate values produce anisotropic wrinkling patterns.</li>
     </ul>
+    <p><strong>Verlet Data Panel (V button)</strong></p>
+    <p>The V panel samples up to 6 vertices each frame and displays the raw Verlet bookkeeping. All values are in world units (metres) along the Y-axis (gravity direction).</p>
+    <ul style="padding-left:1.2rem;line-height:2">
+      <li><strong>Y<sub>prev</sub></strong> — Vertex Y position at the <em>start</em> of the current frame, before any integration step. This is the "previous frame" snapshot captured by <code>framePrevPos</code>.</li>
+      <li><strong>Y<sub>cur</sub></strong> — Vertex Y position at the <em>end</em> of the current frame, after all ${SUBSTEPS} substeps have run. This is the live <code>positions</code> buffer.</li>
+      <li><strong>ΔY</strong> — Net displacement this frame: $\\Delta Y = Y_{cur} - Y_{prev}$. Negative (red) means the vertex fell; positive (green) means it bounced upward. The magnitude grows each frame as velocity accumulates under gravity.</li>
+      <li><strong>Y<sub>next</sub>~</strong> — Estimated position one frame ahead, computed as: $Y_{next} \\approx Y_{cur} + \\Delta Y \\cdot d + g \\cdot \\delta t^2 \\cdot S$ where $d$ is the damping factor, $\\delta t = \\Delta t / S$ is the per-substep time, and $S = 8$ is the substep count. This is an approximation — spring constraints are not applied here.</li>
+    </ul>
+    <p>The formula block in the panel expands the per-substep mechanics for vertex 0:</p>
+    <pre><code class="language-js">// Per substep (×8 per frame)
+vel   = (pos - prevPos) * damping   // implicit velocity
+grav  = GRAVITY * subDt * subDt     // position-level gravity term
+pos  += vel + grav                  // Verlet update</code></pre>
+    <p>Because Verlet stores velocity <em>implicitly</em> as the difference between two consecutive positions (rather than as a separate vector), damping is applied as a simple scale on that difference. The gravity term $g\,\delta t^2$ is added directly to the position — it is tiny per substep but integrates to the familiar $\\frac{1}{2}g t^2$ parabola over time.</p>
+    <p><strong>Grid Resolution &amp; Spectrum Size</strong></p>
+    <p>The Topology control selects the number of <em>segments</em> per axis. A grid with $n$ segments has $(n+1)^2$ vertices, a $K$ matrix of dimension $(n+1)^2 \\times (n+1)^2$, and the same number of distinct 2-D normal modes — one for each $(k_x, k_y)$ pair.</p>
+    <table style="border-collapse:collapse;font-size:0.82rem;width:100%;margin:0.5rem 0">
+      <thead><tr style="border-bottom:1px solid #4C566A;color:#81A1C1">
+        <th style="text-align:left;padding:4px 8px">Grid</th>
+        <th style="text-align:right;padding:4px 8px">Segments</th>
+        <th style="text-align:right;padding:4px 8px">Vertices N</th>
+        <th style="text-align:right;padding:4px 8px">K dim</th>
+        <th style="text-align:right;padding:4px 8px">Modes</th>
+        <th style="text-align:right;padding:4px 8px">3-D eigvec dim</th>
+      </tr></thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #3B4252"><td style="padding:3px 8px">1×1</td><td style="text-align:right;padding:3px 8px">1</td><td style="text-align:right;padding:3px 8px">4</td><td style="text-align:right;padding:3px 8px">4×4</td><td style="text-align:right;padding:3px 8px">4</td><td style="text-align:right;padding:3px 8px">12×12</td></tr>
+        <tr style="border-bottom:1px solid #3B4252"><td style="padding:3px 8px">2×2</td><td style="text-align:right;padding:3px 8px">2</td><td style="text-align:right;padding:3px 8px">9</td><td style="text-align:right;padding:3px 8px">9×9</td><td style="text-align:right;padding:3px 8px">9</td><td style="text-align:right;padding:3px 8px">27×27</td></tr>
+        <tr style="border-bottom:1px solid #3B4252"><td style="padding:3px 8px">4×4</td><td style="text-align:right;padding:3px 8px">4</td><td style="text-align:right;padding:3px 8px">25</td><td style="text-align:right;padding:3px 8px">25×25</td><td style="text-align:right;padding:3px 8px">25</td><td style="text-align:right;padding:3px 8px">75×75</td></tr>
+        <tr style="border-bottom:1px solid #3B4252"><td style="padding:3px 8px">9×9</td><td style="text-align:right;padding:3px 8px">9</td><td style="text-align:right;padding:3px 8px">100</td><td style="text-align:right;padding:3px 8px">100×100</td><td style="text-align:right;padding:3px 8px">100</td><td style="text-align:right;padding:3px 8px">300×300</td></tr>
+        <tr><td style="padding:3px 8px">19×19</td><td style="text-align:right;padding:3px 8px">19</td><td style="text-align:right;padding:3px 8px">400</td><td style="text-align:right;padding:3px 8px">400×400</td><td style="text-align:right;padding:3px 8px">400</td><td style="text-align:right;padding:3px 8px">1200×1200</td></tr>
+      </tbody>
+    </table>
+    <p>The <strong>3-D eigenvector dimension</strong> is $3N \\times 3N$ because each vertex has three degrees of freedom $(x, y, z)$. The E panel displays the X, Y, Z directions separately as $N \\times N$ sub-matrices. The spectrum shown in the side panel and Spectrum tab is capped at $\\min(N, 25)$ modes for readability.</p>
+    <p>The condition number $\\kappa = \\lambda_{max} / \\lambda_{min}$ grows with resolution: finer grids introduce slower low-frequency modes alongside the stiff high-frequency ones. A large $\\kappa$ makes the system harder to integrate stably — this is why very fine grids with high stiffness require more substeps or lower time-steps to remain stable.</p>
   `,
   zhTW: `
     <p>這個模擬使用 <strong>Verlet 積分法</strong> 在重力與彈簧約束下推進布料粒子的位置。</p>
@@ -584,6 +656,41 @@ positions[i].y += gravity * dt²;</code></pre>
       <li><strong>阻尼（Damping）</strong> — 每步的速度保留率（$0{-}1$）。設為 1.0 時振動永不衰減，可清楚觀察到各特徵模式以駐波形式存在。數值越低能量耗散越快；低於約 0.90 時振動在數幀內即消失。</li>
       <li><strong>剪力比（Shear Ratio）</strong> — 對角彈簧相對於結構彈簧的剛度倍率。設為 0 時布料無抗剪能力，像鬆散的網；設為 1 時對角與結構彈簧等剛。中間值會產生各向異性的皺褶圖案。</li>
     </ul>
+    <p><strong>Verlet 數據面板（V 按鈕）</strong></p>
+    <p>V 面板每 frame 取樣最多 6 個頂點，直接顯示 Verlet 積分的原始計算數據。所有數值單位為世界座標（公尺），聚焦於 Y 軸（重力方向）。</p>
+    <ul style="padding-left:1.2rem;line-height:2">
+      <li><strong>Y<sub>prev</sub></strong> — 頂點在本 frame <em>開始前</em>（積分步驟執行前）的 Y 座標，由 <code>framePrevPos</code> 快照記錄，代表「上一 frame」的位置。</li>
+      <li><strong>Y<sub>cur</sub></strong> — 頂點在本 frame <em>結束後</em>（所有 8 個子步驟完成後）的 Y 座標，直接讀取 <code>positions</code> 緩衝區，代表「當前 frame」的位置。</li>
+      <li><strong>ΔY</strong> — 本 frame 的淨位移：$\\Delta Y = Y_{cur} - Y_{prev}$。負值（紅色）表示頂點下落，正值（綠色）表示反彈向上。隨著速度在重力下累積，每 frame 的絕對值會持續增大，直到碰到球體或地面為止。</li>
+      <li><strong>Y<sub>next</sub>~</strong> — 預估下一 frame 的位置：$Y_{next} \\approx Y_{cur} + \\Delta Y \\cdot d + g \\cdot \\delta t^2 \\cdot S$，其中 $d$ 為阻尼係數，$\\delta t = \\Delta t / S$ 為每子步驟時間，$S = 8$ 為子步驟數。此為近似值，未套用彈簧約束。</li>
+    </ul>
+    <p>面板下方的公式 block 展開頂點 0 的逐子步驟計算過程：</p>
+    <pre><code class="language-js">// 每個子步驟（每 frame 執行 ×8）
+vel   = (pos - prevPos) * damping   // 隱式速度
+grav  = GRAVITY * subDt * subDt     // 位置層級的重力項
+pos  += vel + grav                  // Verlet 更新</code></pre>
+    <p>Verlet 積分的核心特性在於速度以<em>隱式</em>方式存在——以兩個連續位置的差值表達，而非獨立的速度向量。阻尼因此只需對這個差值做縮放即可。重力項 $g\,\\delta t^2$ 每子步驟對位置的貢獻極小，但經過多 frame 累積後會重現熟悉的 $\\frac{1}{2}g t^2$ 拋物線軌跡。</p>
+    <p><strong>網格解析度與特徵譜大小</strong></p>
+    <p>Topology 控制每軸的<em>段數</em>。$n$ 段的網格有 $(n+1)^2$ 個頂點、$(n+1)^2 \\times (n+1)^2$ 的剛度矩陣 $K$，以及相同數量的二維正規模式——對應每個 $(k_x, k_y)$ 組合。</p>
+    <table style="border-collapse:collapse;font-size:0.82rem;width:100%;margin:0.5rem 0">
+      <thead><tr style="border-bottom:1px solid #4C566A;color:#81A1C1">
+        <th style="text-align:left;padding:4px 8px">網格</th>
+        <th style="text-align:right;padding:4px 8px">段數</th>
+        <th style="text-align:right;padding:4px 8px">頂點 N</th>
+        <th style="text-align:right;padding:4px 8px">K 維度</th>
+        <th style="text-align:right;padding:4px 8px">模式數</th>
+        <th style="text-align:right;padding:4px 8px">3D 特徵向量維度</th>
+      </tr></thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #3B4252"><td style="padding:3px 8px">1×1</td><td style="text-align:right;padding:3px 8px">1</td><td style="text-align:right;padding:3px 8px">4</td><td style="text-align:right;padding:3px 8px">4×4</td><td style="text-align:right;padding:3px 8px">4</td><td style="text-align:right;padding:3px 8px">12×12</td></tr>
+        <tr style="border-bottom:1px solid #3B4252"><td style="padding:3px 8px">2×2</td><td style="text-align:right;padding:3px 8px">2</td><td style="text-align:right;padding:3px 8px">9</td><td style="text-align:right;padding:3px 8px">9×9</td><td style="text-align:right;padding:3px 8px">9</td><td style="text-align:right;padding:3px 8px">27×27</td></tr>
+        <tr style="border-bottom:1px solid #3B4252"><td style="padding:3px 8px">4×4</td><td style="text-align:right;padding:3px 8px">4</td><td style="text-align:right;padding:3px 8px">25</td><td style="text-align:right;padding:3px 8px">25×25</td><td style="text-align:right;padding:3px 8px">25</td><td style="text-align:right;padding:3px 8px">75×75</td></tr>
+        <tr style="border-bottom:1px solid #3B4252"><td style="padding:3px 8px">9×9</td><td style="text-align:right;padding:3px 8px">9</td><td style="text-align:right;padding:3px 8px">100</td><td style="text-align:right;padding:3px 8px">100×100</td><td style="text-align:right;padding:3px 8px">100</td><td style="text-align:right;padding:3px 8px">300×300</td></tr>
+        <tr><td style="padding:3px 8px">19×19</td><td style="text-align:right;padding:3px 8px">19</td><td style="text-align:right;padding:3px 8px">400</td><td style="text-align:right;padding:3px 8px">400×400</td><td style="text-align:right;padding:3px 8px">400</td><td style="text-align:right;padding:3px 8px">1200×1200</td></tr>
+      </tbody>
+    </table>
+    <p><strong>3D 特徵向量維度</strong>為 $3N \\times 3N$，因為每個頂點有三個自由度 $(x, y, z)$。E 面板將 X、Y、Z 方向分開，各以 $N \\times N$ 子矩陣呈現。側邊欄與 Spectrum 頁籤的特徵譜最多顯示 $\\min(N, 25)$ 個模式以維持可讀性。</p>
+    <p>條件數 $\\kappa = \\lambda_{max} / \\lambda_{min}$ 隨解析度提升而增大：較細的網格在引入高頻剛性模式的同時，也帶入了更慢的低頻模式。$\\kappa$ 越大，系統越難穩定積分——這正是高解析度搭配高剛度時，需要更多子步驟或更小時間步長才能保持穩定的原因。</p>
   `,
 };
 
@@ -610,6 +717,159 @@ langToggle.addEventListener('click', () => {
   modalLang = modalLang === 'en' ? 'zhTW' : 'en';
   renderModal();
 });
+
+// ── Verlet popup ──────────────────────────────────────────────────────────────
+function captureVerletSnapshot(dt) {
+  verletFrame++;
+  if (!positions || !framePrevPos) return;
+
+  const maxSample = Math.min(N, 6);
+  const stride    = Math.max(1, Math.floor(N / maxSample));
+  const sampleIdx = [];
+  for (let i = 0; i < N && sampleIdx.length < maxSample; i += stride) sampleIdx.push(i);
+
+  const dtClamped = Math.min(dt, 0.025);
+  const subDt     = dtClamped / SUBSTEPS;
+
+  verletSnap = {
+    frame: verletFrame,
+    dt,
+    subDt,
+    dtClamped,
+    state: simState,
+    sampleIdx,
+    prev: sampleIdx.map(i => [framePrevPos[i*3], framePrevPos[i*3+1], framePrevPos[i*3+2]]),
+    cur:  sampleIdx.map(i => [positions[i*3],    positions[i*3+1],    positions[i*3+2]]),
+  };
+}
+
+function renderVerletPopup() {
+  if (!verletSnap) {
+    verletViewBody.innerHTML = '<div style="color:var(--nord4);font-size:0.75rem;padding:0.5rem">Loading…</div>';
+    return;
+  }
+
+  const { frame, dt, subDt, dtClamped, state, sampleIdx, prev, cur } = verletSnap;
+  const damping = guiParams.damping;
+
+  verletViewBody.innerHTML = '';
+
+  // Frame info
+  const stateColor = state === 'falling' ? 'var(--nord14)' : state === 'settled' ? 'var(--nord13)' : 'var(--nord3)';
+  const info = document.createElement('div');
+  info.style.cssText = 'display:flex;gap:0.7rem;flex-wrap:wrap;margin-bottom:0.55rem;font-size:0.65rem';
+  info.innerHTML =
+    `<span style="color:var(--nord4)">Frame <span style="color:var(--nord8)">${frame}</span></span>` +
+    `<span style="color:var(--nord4)">dt <span style="color:var(--nord8)">${(dt*1000).toFixed(1)}ms</span></span>` +
+    `<span style="color:var(--nord4)">subDt <span style="color:var(--nord8)">${(subDt*1000).toFixed(2)}ms</span></span>` +
+    `<span style="color:${stateColor}">${state}</span>`;
+  verletViewBody.appendChild(info);
+
+  if (state === 'idle') {
+    const msg = document.createElement('div');
+    msg.style.cssText = 'color:var(--nord3);font-size:0.72rem;padding:0.5rem 0';
+    msg.textContent = 'Press Drop to start simulation.';
+    verletViewBody.appendChild(msg);
+    verletPopupMeta.innerHTML =
+      `x<sub>t+Δt</sub> = x<sub>t</sub> + (x<sub>t</sub>−x<sub>t-Δt</sub>)·d + g·Δt²`;
+    return;
+  }
+
+  // Vertex table (Y axis focus)
+  const table = document.createElement('table');
+  table.style.cssText = 'border-collapse:collapse;width:100%;font-size:0.62rem;margin-bottom:0.6rem';
+  table.innerHTML =
+    `<thead><tr style="color:var(--nord3);border-bottom:1px solid var(--nord2)">` +
+    `<th style="text-align:right;padding:2px 5px">vtx</th>` +
+    `<th style="text-align:right;padding:2px 5px">Y<sub>prev</sub></th>` +
+    `<th style="text-align:right;padding:2px 5px">Y<sub>cur</sub></th>` +
+    `<th style="text-align:right;padding:2px 5px">ΔY</th>` +
+    `<th style="text-align:right;padding:2px 5px">Y<sub>next</sub>~</th>` +
+    `</tr></thead>`;
+
+  const tbody = document.createElement('tbody');
+  sampleIdx.forEach((vi, i) => {
+    const py = prev[i][1];
+    const cy = cur[i][1];
+    const dy = cy - py;
+    const vel_y  = dy * damping;
+    const grav_y = GRAVITY * subDt * subDt * SUBSTEPS;
+    const ny = cy + vel_y + grav_y;
+    const dyColor = dy < -0.0005 ? 'var(--nord11)' : dy > 0.0005 ? 'var(--nord14)' : 'var(--nord4)';
+
+    const tr = document.createElement('tr');
+    tr.style.cssText = 'border-bottom:1px solid rgba(76,86,106,0.25)';
+    tr.title = `vtx ${vi}: prev(${prev[i].map(v=>v.toFixed(3)).join(', ')})  cur(${cur[i].map(v=>v.toFixed(3)).join(', ')})`;
+    tr.innerHTML =
+      `<td style="text-align:right;padding:2px 5px;color:var(--nord4)">${vi}</td>` +
+      `<td style="text-align:right;padding:2px 5px;color:var(--nord9)">${py.toFixed(4)}</td>` +
+      `<td style="text-align:right;padding:2px 5px;color:var(--nord8)">${cy.toFixed(4)}</td>` +
+      `<td style="text-align:right;padding:2px 5px;color:${dyColor}">${dy >= 0 ? '+' : ''}${dy.toFixed(4)}</td>` +
+      `<td style="text-align:right;padding:2px 5px;color:var(--nord13)">${ny.toFixed(4)}</td>`;
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  verletViewBody.appendChild(table);
+
+  // Formula block for first sampled vertex
+  if (sampleIdx.length > 0) {
+    const py     = prev[0][1];
+    const cy     = cur[0][1];
+    const vel_y  = (cy - py) * damping;
+    const grav_y = GRAVITY * subDt * subDt * SUBSTEPS;
+    const ny     = cy + vel_y + grav_y;
+
+    const block = document.createElement('div');
+    block.style.cssText =
+      'font-size:0.61rem;color:var(--nord4);line-height:1.85;padding:0.4rem 0.55rem;' +
+      'background:rgba(46,52,64,0.55);border-radius:6px;margin-bottom:0.3rem';
+    block.innerHTML =
+      `<span style="color:var(--nord3)">// vtx ${sampleIdx[0]}  Y-axis  ×${SUBSTEPS} substeps</span><br>` +
+      `<span style="color:var(--nord9)">Y_prev</span>  = <span style="color:var(--nord13)">${py.toFixed(5)}</span><br>` +
+      `<span style="color:var(--nord8)">Y_cur</span>   = <span style="color:var(--nord13)">${cy.toFixed(5)}</span><br>` +
+      `vel     = ΔY × d  = ${(cy-py).toFixed(5)} × ${damping.toFixed(3)} = <span style="color:var(--nord11)">${vel_y.toFixed(5)}</span><br>` +
+      `grav    = g × subDt² × ${SUBSTEPS} = <span style="color:var(--nord11)">${grav_y.toFixed(5)}</span><br>` +
+      `<span style="color:var(--nord14)">Y_next</span>~ = Y_cur + vel + grav = <span style="color:var(--nord13)">${ny.toFixed(5)}</span>`;
+    verletViewBody.appendChild(block);
+  }
+
+  verletPopupMeta.innerHTML =
+    `x<sub>t+Δt</sub> = x<sub>t</sub> + (x<sub>t</sub>−x<sub>t-Δt</sub>)·d + g·Δt² &nbsp;·&nbsp; d=${damping.toFixed(3)}<br>` +
+    `${sampleIdx.length} verts sampled &nbsp;·&nbsp; hover row for XYZ detail`;
+}
+
+openVerlet.addEventListener('click', () => {
+  verletPopup.hidden = !verletPopup.hidden;
+  openVerlet.classList.toggle('active', !verletPopup.hidden);
+  if (!verletPopup.hidden) {
+    if (!verletPopup.dataset.positioned) {
+      verletPopup.dataset.positioned = '1';
+      const btnRect = openVerlet.getBoundingClientRect();
+      const initH = Math.round(Math.min(500, Math.max(320, window.innerHeight * 0.42)));
+      verletPopup.style.left = `${Math.max(8, btnRect.left)}px`;
+      verletPopup.style.top  = `${Math.max(8, btnRect.top - initH - 12)}px`;
+    }
+    renderVerletPopup();
+  }
+});
+closeVerlet.addEventListener('click', () => {
+  verletPopup.hidden = true;
+  openVerlet.classList.remove('active');
+});
+
+let verletDrag = null;
+verletPopup.querySelector('.verlet-popup-header').addEventListener('mousedown', e => {
+  if (e.target.closest('button')) return;
+  const rect = verletPopup.getBoundingClientRect();
+  verletDrag = { ox: e.clientX - rect.left, oy: e.clientY - rect.top };
+  e.preventDefault();
+});
+document.addEventListener('mousemove', e => {
+  if (!verletDrag) return;
+  verletPopup.style.left = `${Math.max(0, Math.min(window.innerWidth  - 60, e.clientX - verletDrag.ox))}px`;
+  verletPopup.style.top  = `${Math.max(0, Math.min(window.innerHeight - 60, e.clientY - verletDrag.oy))}px`;
+});
+document.addEventListener('mouseup', () => { verletDrag = null; });
 
 // ── Eigen-spectrum popup ──────────────────────────────────────────────────────
 /** nord9 → nord13 → nord11, returns [r,g,b] */
@@ -1034,7 +1294,10 @@ function animate(now = 0) {
   const dt = Math.min((now - lastTime) / 1000, 0.033);
   lastTime = now;
 
+  if (framePrevPos && simState === 'falling') framePrevPos.set(positions);
   stepSimulation(dt);
+  captureVerletSnapshot(dt);
+  if (!verletPopup.hidden) renderVerletPopup();
   updateFps(now);
   controls.update();
   renderer.render(scene, camera);

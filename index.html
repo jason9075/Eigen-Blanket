@@ -254,6 +254,88 @@
     }
 
 
+    /* V verlet popup button */
+    #open-verlet {
+      position: fixed;
+      bottom: 5.3rem;
+      left: 0.75rem;
+      width: 2.4rem;
+      height: 2.4rem;
+      font-size: 0.85rem;
+      font-weight: 700;
+      font-family: inherit;
+      color: var(--nord14);
+      background: rgba(59,66,82,0.9);
+      border: 1px solid var(--nord3);
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      z-index: 30;
+      transition: background 0.15s;
+      letter-spacing: 0;
+    }
+    #open-verlet:hover { background: var(--nord2); }
+    #open-verlet.active { background: var(--nord14); border-color: var(--nord14); color: var(--nord0); }
+
+    /* Verlet popup */
+    #verlet-popup[hidden] { display: none; }
+    #verlet-popup { position: fixed; z-index: 35; }
+    .verlet-popup-inner {
+      background: var(--nord1);
+      border: 1px solid var(--nord3);
+      border-radius: 14px;
+      padding: 0.9rem 1rem;
+      box-shadow: 0 10px 36px rgba(0,0,0,0.45);
+      width: clamp(300px, 28vw, 440px);
+      height: clamp(320px, 42vh, 500px);
+      min-width: 260px;
+      min-height: 240px;
+      max-width: calc(100vw - 1.5rem);
+      max-height: calc(100vh - 2rem);
+      resize: both;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .verlet-popup-header {
+      flex-shrink: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+      cursor: move;
+      user-select: none;
+    }
+    .verlet-popup-header button { cursor: pointer; }
+    .verlet-popup-header span {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--nord14);
+      font-weight: 700;
+    }
+    .verlet-popup-header > button {
+      background: none;
+      border: none;
+      color: var(--nord4);
+      cursor: pointer;
+      font-size: 1.1rem;
+      line-height: 1;
+      padding: 0;
+      font-family: inherit;
+    }
+    .verlet-popup-header > button:hover { color: var(--nord6); }
+    #verlet-view-body { flex: 1; overflow: auto; min-height: 0; }
+    #verlet-popup-meta {
+      flex-shrink: 0;
+      font-size: 0.67rem;
+      color: var(--nord4);
+      border-top: 1px solid var(--nord2);
+      padding-top: 0.5rem;
+      line-height: 1.6;
+    }
+
     /* E eigen popup button */
     #open-eigen {
       position: fixed;
@@ -593,6 +675,21 @@
         </div>
       </div>
     </aside>
+  </div>
+
+  <!-- V verlet button -->
+  <button id="open-verlet" type="button" aria-haspopup="true" aria-controls="verlet-popup" aria-label="Show Verlet Integration">V</button>
+
+  <!-- Verlet popup -->
+  <div id="verlet-popup" hidden>
+    <div class="verlet-popup-inner">
+      <div class="verlet-popup-header">
+        <span>Verlet Integration</span>
+        <button id="close-verlet" type="button" aria-label="Close">×</button>
+      </div>
+      <div id="verlet-view-body"></div>
+      <div id="verlet-popup-meta"></div>
+    </div>
   </div>
 
   <!-- E eigen-spectrum button -->
