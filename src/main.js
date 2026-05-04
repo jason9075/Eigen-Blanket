@@ -497,6 +497,13 @@ const MODAL_COPY = {
 prevPos[i] = positions[i];
 positions[i] += velocity[i] * damping;
 positions[i].y += gravity * dt²;</code></pre>
+    <p><strong>Parameter Guide</strong></p>
+    <ul style="padding-left:1.2rem;line-height:2">
+      <li><strong>K (Stiffness)</strong> — Spring stiffness constant $s$. Higher values make the cloth resist deformation more strongly and shift all eigenvalues upward ($\\lambda_k \\propto s$). Very high K with coarse topology can cause numerical instability.</li>
+      <li><strong>Mass</strong> — Uniform particle mass $m$. Heavier cloth has more inertia: springs correct positions more slowly ($\\Delta\\mathbf{x} \\propto 1/m$), so the cloth drapes with a sluggish, heavy feel. Mass does <em>not</em> affect free-fall speed — gravitational acceleration $g$ is independent of mass.</li>
+      <li><strong>Damping</strong> — Velocity retention per step ($0{-}1$). At 1.0 the cloth oscillates indefinitely, exposing individual eigenmodes as standing waves. Lower values dissipate energy faster; below ≈ 0.90 oscillations collapse within a few frames.</li>
+      <li><strong>Shear Ratio</strong> — Stiffness multiplier for diagonal springs relative to structural springs. At 0 the cloth has no shear resistance and collapses like a loose net; at 1 diagonal and structural springs are equally stiff. Intermediate values produce anisotropic wrinkling patterns.</li>
+    </ul>
   `,
   zhTW: `
     <p>這個模擬使用 <strong>Verlet 積分法</strong> 在重力與彈簧約束下推進布料粒子的位置。</p>
@@ -511,6 +518,13 @@ positions[i].y += gravity * dt²;</code></pre>
 prevPos[i] = positions[i];
 positions[i] += velocity[i] * damping;
 positions[i].y += gravity * dt²;</code></pre>
+    <p><strong>參數說明</strong></p>
+    <ul style="padding-left:1.2rem;line-height:2">
+      <li><strong>K（剛度）</strong> — 彈簧剛度常數 $s$。數值越高，布料越抵抗形變，所有特徵值同步上移（$\\lambda_k \\propto s$）。在粗糙網格搭配極高 K 值時可能造成數值不穩定。</li>
+      <li><strong>質量（Mass）</strong> — 每個粒子的統一質量 $m$。質量越大，慣性越強，彈簧位移修正量越小（$\\Delta\\mathbf{x} \\propto 1/m$），布料下墜後皺褶展開遲緩、觸感沉重。質量<em>不影響</em>自由落體速度——重力加速度 $g$ 與質量無關。</li>
+      <li><strong>阻尼（Damping）</strong> — 每步的速度保留率（$0{-}1$）。設為 1.0 時振動永不衰減，可清楚觀察到各特徵模式以駐波形式存在。數值越低能量耗散越快；低於約 0.90 時振動在數幀內即消失。</li>
+      <li><strong>剪力比（Shear Ratio）</strong> — 對角彈簧相對於結構彈簧的剛度倍率。設為 0 時布料無抗剪能力，像鬆散的網；設為 1 時對角與結構彈簧等剛。中間值會產生各向異性的皺褶圖案。</li>
+    </ul>
   `,
 };
 
