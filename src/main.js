@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import GUI from 'lil-gui';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const canvas       = document.getElementById('canvas');
@@ -17,9 +18,7 @@ const mathContent  = document.getElementById('math-content');
 const statVerts    = document.getElementById('stat-verts');
 const statDim      = document.getElementById('stat-dim');
 const statFps      = document.getElementById('stat-fps');
-const sbVerts      = document.getElementById('sb-verts');
-const sbFps        = document.getElementById('sb-fps');
-const sbState      = document.getElementById('sb-state');
+const statState    = document.getElementById('stat-state');
 const specChart    = document.getElementById('spectrum-chart');
 
 // ── Renderer / Scene / Camera ─────────────────────────────────────────────────
@@ -32,7 +31,7 @@ scene.background = new THREE.Color(0x2E3440);
 scene.fog = new THREE.Fog(0x2E3440, 18, 35);
 
 const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 100);
-camera.position.set(0, 4, 8);
+camera.position.set(0, 5, 8);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -87,6 +86,13 @@ const PRESETS = {
   soft:   { stiffness: 200,  damping: 0.98 },
   medium: { stiffness: 500,  damping: 0.96 },
   stiff:  { stiffness: 1200, damping: 0.93 },
+};
+
+const guiParams = {
+  stiffness:  PRESETS.soft.stiffness,
+  mass:       1.0,
+  damping:    PRESETS.soft.damping,
+  shearRatio: 0.6,
 };
 
 let resolution   = 1;        // segments per axis
@@ -190,7 +196,7 @@ function stepSimulation(dt) {
   if (simState !== 'falling') return;
 
   const segs = resolution;
-  const { stiffness, damping } = PRESETS[preset];
+  const { stiffness, damping, shearRatio } = guiParams;
   const restLen = CLOTH_SIZE / segs;
   // Use a fixed physics dt so gravity feels consistent regardless of frame rate
   const subDt = Math.min(dt, 0.025) / SUBSTEPS;
@@ -229,8 +235,8 @@ function stepSimulation(dt) {
           if (j < segs) solveSpring(idx, idx + (segs + 1), restLen, stiffness, subDt);
           // Diagonal shear
           if (i < segs && j < segs) {
-            solveSpring(idx, idx + (segs + 1) + 1, restLen * Math.SQRT2, stiffness * 0.6, subDt);
-            solveSpring(idx + 1, idx + (segs + 1), restLen * Math.SQRT2, stiffness * 0.6, subDt);
+            solveSpring(idx, idx + (segs + 1) + 1, restLen * Math.SQRT2, stiffness * shearRatio, subDt);
+            solveSpring(idx + 1, idx + (segs + 1), restLen * Math.SQRT2, stiffness * shearRatio, subDt);
           }
         }
       }
@@ -323,7 +329,8 @@ function solveSpring(a, b, rest, k, dt) {
   const dy = positions[by] - positions[ay];
   const dz = positions[bz] - positions[az];
   const dist = Math.sqrt(dx*dx + dy*dy + dz*dz) || 0.0001;
-  const delta = (dist - rest) / dist * 0.5 * Math.min(k * dt * dt, 0.48);
+  const invMass = 1 / guiParams.mass;
+  const delta = (dist - rest) / dist * 0.5 * Math.min(k * dt * dt * invMass, 0.48);
   const cx = dx * delta, cy = dy * delta, cz = dz * delta;
   if (!pinned[a]) { positions[ax] += cx; positions[ay] += cy; positions[az] += cz; }
   if (!pinned[b]) { positions[bx] -= cx; positions[by] -= cy; positions[bz] -= cz; }
@@ -364,7 +371,7 @@ function updateEigenSpectrum() {
   eigenValues = [];
   for (let k = 1; k <= 10; k++) {
     // Mass-spring eigenvalue approx: λ_k ≈ 4·stiffness·sin²(kπ/2N)
-    const stiffness = PRESETS[preset].stiffness;
+    const stiffness = guiParams.stiffness;
     const lam = 4 * stiffness * Math.pow(Math.sin(k * Math.PI / (2 * (segs + 1))), 2);
     eigenValues.push(lam);
   }
@@ -389,7 +396,6 @@ let lastFpsTime = 0, frameCount = 0, fps = 0;
 function updateStats() {
   statVerts.textContent = N;
   statDim.textContent   = `${N}×${N}`;
-  sbVerts.textContent   = N;
 }
 
 function updateFps(now) {
@@ -399,13 +405,28 @@ function updateFps(now) {
     frameCount = 0;
     lastFpsTime = now;
     statFps.textContent = fps;
-    sbFps.textContent   = fps;
   }
 }
 
 function updateStatusBar(state) {
-  sbState.textContent = `State: ${state}`;
+  statState.textContent = state;
 }
+
+// ── lil-gui ───────────────────────────────────────────────────────────────────
+const gui = new GUI({ container: document.getElementById('viewport'), width: 220 });
+gui.domElement.style.cssText = 'position:absolute;top:0.5rem;left:0.5rem;';
+gui.add(guiParams, 'stiffness', 50, 2000, 10).name('K (Stiffness)').onChange(updateEigenSpectrum);
+gui.add(guiParams, 'mass',       0.1, 5,    0.1).name('Mass');
+gui.add(guiParams, 'damping',   0.85, 0.999, 0.001).name('Damping');
+gui.add(guiParams, 'shearRatio', 0,   1,    0.01).name('Shear Ratio');
+gui.add({ reset() {
+  guiParams.stiffness  = PRESETS.soft.stiffness;
+  guiParams.mass       = 1.0;
+  guiParams.damping    = PRESETS.soft.damping;
+  guiParams.shearRatio = 0.6;
+  gui.controllersRecursive().forEach(c => c.updateDisplay());
+  updateEigenSpectrum();
+}}, 'reset').name('Reset to Default');
 
 // ── Controls ──────────────────────────────────────────────────────────────────
 resCtrl.addEventListener('click', e => {
@@ -421,6 +442,9 @@ presetBtns.forEach(btn => {
     presetBtns.forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     preset = btn.dataset.preset;
+    guiParams.stiffness = PRESETS[preset].stiffness;
+    guiParams.damping   = PRESETS[preset].damping;
+    gui.controllersRecursive().forEach(c => c.updateDisplay());
     updateEigenSpectrum();
   });
 });

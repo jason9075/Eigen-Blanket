@@ -26,7 +26,8 @@
   {
     "imports": {
       "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/",
+      "lil-gui": "https://cdn.jsdelivr.net/npm/lil-gui@0.19/+esm"
     }
   }
   </script>
@@ -251,18 +252,6 @@
       min-height: 2px;
     }
 
-    /* Status bar */
-    #statusbar {
-      flex-shrink: 0;
-      padding: 0.4rem 1.25rem;
-      background: rgba(46,52,64,0.96);
-      border-top: 1px solid var(--nord3);
-      font-size: 0.7rem;
-      color: var(--nord3);
-      display: flex;
-      gap: 1.5rem;
-    }
-    #statusbar span { color: var(--nord8); }
 
     /* 💡 Math modal trigger */
     #open-math {
@@ -405,6 +394,9 @@
         <div class="monitor-row">
           <span>Sim FPS</span><span id="stat-fps">—</span>
         </div>
+        <div class="monitor-row">
+          <span>State</span><span id="stat-state">Idle</span>
+        </div>
         <div class="monitor-row" style="margin-top:0.6rem">
           <span style="font-size:0.68rem;color:var(--nord3)">Eigen-Spectrum (top 10)</span>
         </div>
@@ -414,13 +406,6 @@
       </div>
     </aside>
   </div>
-
-  <!-- Status bar -->
-  <footer id="statusbar">
-    <span>N=<span id="sb-verts">0</span> Vertices</span>
-    <span>Simulation: <span id="sb-fps">0</span> FPS</span>
-    <span id="sb-state">State: Idle</span>
-  </footer>
 
   <!-- 💡 Math explanation button -->
   <button id="open-math" type="button" aria-haspopup="dialog" aria-controls="math-modal" aria-label="Explain the math">💡</button>
