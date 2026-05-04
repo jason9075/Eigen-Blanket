@@ -249,6 +249,23 @@ function stepSimulation(dt) {
         }
       }
 
+      // Edge sphere collision (catches tunneling on coarse meshes like 1×1)
+      for (let j = 0; j <= segs; j++) {
+        for (let i = 0; i < segs; i++)
+          solveEdgeSphere(j*(segs+1)+i, j*(segs+1)+i+1);
+      }
+      for (let j = 0; j < segs; j++) {
+        for (let i = 0; i <= segs; i++)
+          solveEdgeSphere(j*(segs+1)+i, (j+1)*(segs+1)+i);
+      }
+      for (let j = 0; j < segs; j++) {
+        for (let i = 0; i < segs; i++) {
+          const base = j*(segs+1)+i;
+          solveEdgeSphere(base, base+(segs+1)+1);
+          solveEdgeSphere(base+1, base+(segs+1));
+        }
+      }
+
       // Ground collision
       for (let i = 0; i < N; i++) {
         if (positions[i * 3 + 1] < 0.01) positions[i * 3 + 1] = 0.01;
@@ -265,10 +282,36 @@ function stepSimulation(dt) {
   let meanY1 = 0;
   for (let i = 0; i < N; i++) meanY1 += positions[i * 3 + 1];
   meanY1 /= N;
-  if (Math.abs(meanY1 - meanY0) < 0.00015) {
+  if (meanY1 < CLOTH_Y0 - 1.0 && Math.abs(meanY1 - meanY0) < 0.00015) {
     simState = 'settled';
     updateStatusBar('Settled');
   }
+}
+
+// Segment-sphere collision: prevents cloth tunneling on coarse meshes.
+// Finds the closest point on edge (a,b) to the sphere and pushes both
+// endpoints outward if the edge penetrates the sphere.
+function solveEdgeSphere(a, b) {
+  const ax = a*3, ay = a*3+1, az = a*3+2;
+  const bx = b*3, by = b*3+1, bz = b*3+2;
+  const sx = sphere.position.x, sy = sphere.position.y, sz = sphere.position.z;
+  const pax = positions[ax], pay = positions[ay], paz = positions[az];
+  const edx = positions[bx]-pax, edy = positions[by]-pay, edz = positions[bz]-paz;
+  const lenSq = edx*edx + edy*edy + edz*edz;
+  if (lenSq < 1e-8) return;
+  // t in (0.01, 0.99) skips near-vertex region already handled by vertex loop
+  const t = Math.max(0.01, Math.min(0.99,
+    ((sx-pax)*edx + (sy-pay)*edy + (sz-paz)*edz) / lenSq));
+  const cx = pax+t*edx-sx, cy = pay+t*edy-sy, cz = paz+t*edz-sz;
+  const dSq = cx*cx + cy*cy + cz*cz;
+  const minDist = SPHERE_RADIUS + 0.025;
+  if (dSq >= minDist*minDist || dSq < 1e-8) return;
+  const d = Math.sqrt(dSq);
+  const pen = minDist - d;
+  const nx = cx/d*pen, ny = cy/d*pen, nz = cz/d*pen;
+  // Pushing both endpoints by the same vector moves the closest point by exactly pen
+  if (!pinned[a]) { positions[ax] += nx; positions[ay] += ny; positions[az] += nz; }
+  if (!pinned[b]) { positions[bx] += nx; positions[by] += ny; positions[bz] += nz; }
 }
 
 function solveSpring(a, b, rest, k, dt) {
