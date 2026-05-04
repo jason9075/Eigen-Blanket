@@ -540,6 +540,7 @@ const MODAL_COPY = {
     <p>$$\\mathbf{x}_i^{t+\\Delta t} = 2\\mathbf{x}_i^t - \\mathbf{x}_i^{t-\\Delta t} + \\mathbf{a}_i\\,\\Delta t^2$$</p>
     <p>Spring forces between neighbouring particles enforce structural rigidity. Two particles $i$ and $j$ with rest length $L_0$ have a corrective displacement:</p>
     <p>$$\\Delta\\mathbf{x} = \\frac{\\|\\mathbf{d}\\| - L_0}{\\|\\mathbf{d}\\|}\\,\\mathbf{d}\\cdot k$$</p>
+    <p>where $\\mathbf{d} = \\mathbf{x}_j - \\mathbf{x}_i$ is the displacement vector from particle $i$ to particle $j$, and $\\|\\mathbf{d}\\|$ is its current length.</p>
     <p>The <strong>Eigen-Spectrum</strong> shows the analytic approximation of the $k$-th eigenvalue of the mass-spring stiffness matrix $K$:</p>
     <p>$$\\lambda_k \\approx 4s\\sin^2\\!\\left(\\frac{k\\pi}{2N}\\right)$$</p>
     <p>where $s$ is the spring stiffness constant and $N$ is the number of vertices per axis. Higher-frequency modes (large $k$) correspond to rapid local oscillations visible as fine ripples after a Jitter impulse.</p>
@@ -561,6 +562,7 @@ positions[i].y += gravity * dt²;</code></pre>
     <p>$$\\mathbf{x}_i^{t+\\Delta t} = 2\\mathbf{x}_i^t - \\mathbf{x}_i^{t-\\Delta t} + \\mathbf{a}_i\\,\\Delta t^2$$</p>
     <p>相鄰粒子之間的彈簧力確保布料結構的剛性。靜止長度為 $L_0$ 的粒子對 $(i,j)$ 的位移修正量為：</p>
     <p>$$\\Delta\\mathbf{x} = \\frac{\\|\\mathbf{d}\\| - L_0}{\\|\\mathbf{d}\\|}\\,\\mathbf{d}\\cdot k$$</p>
+    <p>其中 $\\mathbf{d} = \\mathbf{x}_j - \\mathbf{x}_i$ 為從粒子 $i$ 指向粒子 $j$ 的位移向量，$\\|\\mathbf{d}\\|$ 為其當前長度。</p>
     <p><strong>特徵譜圖</strong> 顯示質量-彈簧剛度矩陣 $K$ 的第 $k$ 個特徵值近似值：</p>
     <p>$$\\lambda_k \\approx 4s\\sin^2\\!\\left(\\frac{k\\pi}{2N}\\right)$$</p>
     <p>其中 $s$ 為彈簧剛度常數，$N$ 為每軸頂點數。高頻模式（大 $k$）對應快速的局部振動，即按下 Jitter 後可見的細微漣漪。</p>
