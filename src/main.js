@@ -145,8 +145,13 @@ function buildCloth(res) {
       const b = a + 1;
       const c = a + (segs + 1);
       const d = c + 1;
-      indices.push(a, b, d);
-      indices.push(a, d, c);
+      if ((i + j) % 2 === 0) {
+        indices.push(a, b, d);
+        indices.push(a, d, c);
+      } else {
+        indices.push(a, b, c);
+        indices.push(b, d, c);
+      }
     }
   }
 
@@ -164,18 +169,15 @@ function buildCloth(res) {
 
   clothMesh = new THREE.Mesh(clothGeo, clothMat);
   clothMesh.castShadow = true;
-  clothMesh.receiveShadow = true;
   scene.add(clothMesh);
 
-  // Wireframe overlay so mesh topology stays visible
   const wireMat = new THREE.MeshBasicMaterial({
-    color: 0x5E81AC,   // Nord10 subdued blue
+    color: 0xBF616A,
     wireframe: true,
     transparent: true,
     opacity: 0.35,
   });
-  const wireMesh = new THREE.Mesh(clothGeo, wireMat);
-  clothMesh.add(wireMesh);
+  clothMesh.add(new THREE.Mesh(clothGeo, wireMat));
 
   simState = 'idle';
   updateEigenSpectrum();
@@ -331,7 +333,6 @@ function solveSpring(a, b, rest, k, dt) {
 function updateHeatmap() {
   if (!clothGeo || !clothMesh) return;
   const colors = new Float32Array(N * 3);
-  const segs = resolution;
   for (let i = 0; i < N; i++) {
     const iy = i * 3 + 1;
     const stress = Math.max(0, Math.min(1, 1 - (positions[iy] / CLOTH_Y0)));
