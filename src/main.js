@@ -13,11 +13,16 @@ const btnReset     = document.getElementById('btn-reset');
 const btnDrop      = document.getElementById('btn-drop');
 const btnJitter    = document.getElementById('btn-jitter');
 const heatmapToggle= document.getElementById('heatmap-toggle');
-const openMath     = document.getElementById('open-math');
-const closeMath    = document.getElementById('close-math');
-const langToggle   = document.getElementById('language-toggle');
-const mathModal    = document.getElementById('math-modal');
-const mathContent  = document.getElementById('math-content');
+const openMath       = document.getElementById('open-math');
+const closeMath      = document.getElementById('close-math');
+const langToggle     = document.getElementById('language-toggle');
+const mathModal      = document.getElementById('math-modal');
+const mathContent    = document.getElementById('math-content');
+const openEigen      = document.getElementById('open-eigen');
+const closeEigen     = document.getElementById('close-eigen');
+const eigenPopup     = document.getElementById('eigen-popup');
+const eigenViewBody  = document.getElementById('eigen-view-body');
+const eigenPopupMeta = document.getElementById('eigen-popup-meta');
 const statVerts    = document.getElementById('stat-verts');
 const statDim      = document.getElementById('stat-dim');
 const statFps      = document.getElementById('stat-fps');
@@ -105,6 +110,8 @@ let preset       = 'soft';
 let simState     = 'idle';   // idle | falling | settled
 let useHeatmap   = false;
 let modalLang    = 'en';
+let eigenView    = 'k-matrix';
+let eigenVecDir  = 'x';
 
 // Cloth data arrays (rebuilt on resolution change)
 let positions    = null;   // Float32Array [x,y,z, ...]
@@ -409,12 +416,11 @@ function clearHeatmap() {
 
 // ── Eigen-spectrum (analytic approximation) ───────────────────────────────────
 function updateEigenSpectrum() {
-  const segs = resolution;
+  const segs  = resolution;
+  const count = Math.min(N, 25);
   eigenValues = [];
-  for (let k = 1; k <= 10; k++) {
-    // Mass-spring eigenvalue approx: λ_k ≈ 4·stiffness·sin²(kπ/2N)
-    const stiffness = guiParams.stiffness;
-    const lam = 4 * stiffness * Math.pow(Math.sin(k * Math.PI / (2 * (segs + 1))), 2);
+  for (let k = 1; k <= count; k++) {
+    const lam = 4 * guiParams.stiffness * Math.pow(Math.sin(k * Math.PI / (2 * (segs + 1))), 2);
     eigenValues.push(lam);
   }
   renderSpectrumChart();
@@ -430,6 +436,7 @@ function renderSpectrumChart() {
     bar.title = `λ ≈ ${v.toFixed(1)}`;
     specChart.appendChild(bar);
   });
+  if (!eigenPopup.hidden) renderEigenPopup();
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
@@ -602,6 +609,409 @@ mathModal.addEventListener('click', e => { if (e.target === mathModal) mathModal
 langToggle.addEventListener('click', () => {
   modalLang = modalLang === 'en' ? 'zhTW' : 'en';
   renderModal();
+});
+
+// ── Eigen-spectrum popup ──────────────────────────────────────────────────────
+/** nord9 → nord13 → nord11, returns [r,g,b] */
+function eigenColorRGB(t) {
+  const stops = [[0x81,0xA1,0xC1],[0xEB,0xCB,0x8B],[0xBF,0x61,0x6A]];
+  const seg = Math.min(t * 2, 1.9999);
+  const i = Math.floor(seg), f = seg - i;
+  const [a, b] = [stops[i], stops[i + 1]];
+  return [
+    Math.round(a[0] + (b[0]-a[0]) * f),
+    Math.round(a[1] + (b[1]-a[1]) * f),
+    Math.round(a[2] + (b[2]-a[2]) * f),
+  ];
+}
+function eigenColor(t) {
+  const [r,g,b] = eigenColorRGB(t);
+  return `rgb(${r},${g},${b})`;
+}
+
+/** Pick dark or light text for contrast. */
+function contrastColor(r, g, b) {
+  return (0.299*r + 0.587*g + 0.114*b) / 255 > 0.45 ? '#2E3440' : '#ECEFF4';
+}
+
+/** Compact λ value label. */
+function fmtLambda(v) {
+  if (v >= 10000) return `${Math.round(v / 1000)}k`;
+  if (v >= 1000)  return `${(v / 1000).toFixed(1)}k`;
+  if (v >= 10)    return Math.round(v).toString();
+  return v.toFixed(1);
+}
+
+/** Cell px size based on count. */
+function cellPx(n) {
+  if (n <= 4)  return 52;
+  if (n <= 9)  return 40;
+  if (n <= 16) return 28;
+  return 20;
+}
+
+function renderEigenPopup() {
+  const titleMap = {
+    'k-matrix':    'K-Space Matrix',
+    'eigenvectors': 'Eigenvectors',
+    'eigenvalue':  'Eigenvalues',
+    'spectrum':    'Eigen Spectrum',
+  };
+  document.getElementById('eigen-popup-title').textContent = titleMap[eigenView];
+  eigenViewBody.innerHTML = '';
+
+  if      (eigenView === 'k-matrix')    renderKMatrixView();
+  else if (eigenView === 'eigenvectors') renderEigenvectorsView();
+  else if (eigenView === 'eigenvalue')  renderEigenvalueView();
+  else                                  renderSpectrumView();
+}
+
+function renderKMatrixView() {
+  const segs = resolution;
+  const k  = guiParams.stiffness;
+  const ks = k * guiParams.shearRatio;
+
+  const DISP = Math.min(N, 16);
+  const stride = Math.ceil(N / DISP);
+  const rowIdx = [];
+  for (let i = 0; i < N && rowIdx.length < DISP; i += stride) rowIdx.push(i);
+  const dn = rowIdx.length;
+
+  const vals = new Float32Array(dn * dn);
+  let maxV = 0;
+
+  for (let ri = 0; ri < dn; ri++) {
+    const vidx = rowIdx[ri];
+    const vj = Math.floor(vidx / (segs + 1));
+    const vi = vidx % (segs + 1);
+
+    for (let ci = 0; ci < dn; ci++) {
+      const cidx = rowIdx[ci];
+      const cj = Math.floor(cidx / (segs + 1));
+      const ci_ = cidx % (segs + 1);
+
+      let val = 0;
+      if (vidx === cidx) {
+        if (vi < segs) val += k;
+        if (vi > 0)    val += k;
+        if (vj < segs) val += k;
+        if (vj > 0)    val += k;
+        if (vi < segs && vj < segs) val += ks;
+        if (vi > 0    && vj > 0)    val += ks;
+        if (vi < segs && vj > 0)    val += ks;
+        if (vi > 0    && vj < segs) val += ks;
+      } else {
+        const dr = Math.abs(vi - ci_), dc = Math.abs(vj - cj);
+        if      (dr === 1 && dc === 0) val = -k;
+        else if (dr === 0 && dc === 1) val = -k;
+        else if (dr === 1 && dc === 1) val = -ks;
+      }
+      vals[ri * dn + ci] = val;
+      maxV = Math.max(maxV, Math.abs(val));
+    }
+  }
+
+  const cs = cellPx(dn);
+
+  const hint = document.createElement('div');
+  hint.className = 'eigen-matrix-hint';
+  hint.textContent = N > 16
+    ? `K ∈ ℝ^{${N}×${N}} (showing ${dn}×${dn} sample)`
+    : `K ∈ ℝ^{${N}×${N}} (stiffness matrix)`;
+  eigenViewBody.appendChild(hint);
+
+  const grid = document.createElement('div');
+  grid.style.cssText = `display:grid;grid-template-columns:repeat(${dn},${cs}px);gap:3px;margin-bottom:0.55rem`;
+
+  for (let ri = 0; ri < dn; ri++) {
+    for (let ci = 0; ci < dn; ci++) {
+      const v = vals[ri * dn + ci];
+      const cell = document.createElement('div');
+      cell.style.cssText = `width:${cs}px;height:${cs}px;border-radius:2px;`;
+      cell.title = `K[${rowIdx[ri]},${rowIdx[ci]}] = ${v.toFixed(1)}`;
+
+      if (Math.abs(v) < 0.01) {
+        cell.style.background = 'rgba(46,52,64,0.7)';
+      } else {
+        const t = (v / maxV + 1) / 2;
+        const [r,g,b] = eigenColorRGB(t);
+        cell.style.background = `rgb(${r},${g},${b})`;
+        if (cs >= 28) {
+          Object.assign(cell.style, {
+            display: 'grid', placeItems: 'center',
+            fontSize: `${cs >= 40 ? 9 : 7}px`, fontWeight: '600',
+            lineHeight: '1', overflow: 'hidden',
+            color: contrastColor(r, g, b),
+          });
+          if (Math.abs(v) >= 1) cell.textContent = fmtLambda(Math.abs(v));
+        }
+      }
+      grid.appendChild(cell);
+    }
+  }
+  eigenViewBody.appendChild(grid);
+
+  const legDiv = document.createElement('div');
+  legDiv.style.cssText = 'display:flex;align-items:center;gap:0.4rem;margin-bottom:0.55rem';
+  legDiv.innerHTML =
+    `<span style="font-size:0.6rem;color:var(--nord4);white-space:nowrap">−${fmtLambda(maxV)}</span>` +
+    `<div style="flex:1;height:6px;border-radius:3px;background:linear-gradient(to right,${eigenColor(0)},${eigenColor(0.5)},${eigenColor(1)})"></div>` +
+    `<span style="font-size:0.6rem;color:var(--nord4);white-space:nowrap">+${fmtLambda(maxV)}</span>`;
+  eigenViewBody.appendChild(legDiv);
+
+  eigenPopupMeta.innerHTML =
+    `K[i,i] = Σ spring stiffnesses &nbsp;·&nbsp; K[i,j] = −k<br>` +
+    `structural s=${guiParams.stiffness} &nbsp;·&nbsp; shear s=${Math.round(k * guiParams.shearRatio)}`;
+}
+
+function build2DModes(segs, count) {
+  const modes = [];
+  for (let kx = 1; kx <= segs + 1; kx++) {
+    for (let ky = 1; ky <= segs + 1; ky++) {
+      const lam = 4 * guiParams.stiffness * (
+        Math.pow(Math.sin(kx * Math.PI / (2 * (segs + 2))), 2) +
+        Math.pow(Math.sin(ky * Math.PI / (2 * (segs + 2))), 2)
+      );
+      modes.push({ kx, ky, lam });
+    }
+  }
+  modes.sort((a, b) => a.lam - b.lam);
+  return modes.slice(0, count);
+}
+
+function renderEigenvectorsView() {
+  const segs     = resolution;
+  const count    = Math.min(eigenValues.length, 25);
+  const topModes = build2DModes(segs, count);
+
+  // ── Direction sub-tabs ──────────────────────────────────────────────────────
+  const subTabDiv = document.createElement('div');
+  subTabDiv.className = 'eigen-subtab-ctrl';
+  ['x', 'y', 'z'].forEach(dir => {
+    const btn = document.createElement('button');
+    btn.className = 'esubtab' + (eigenVecDir === dir ? ' active' : '');
+    btn.dataset.dir = dir;
+    btn.textContent = dir.toUpperCase();
+    subTabDiv.appendChild(btn);
+  });
+  subTabDiv.addEventListener('click', e => {
+    const btn = e.target.closest('.esubtab[data-dir]');
+    if (!btn) return;
+    eigenVecDir = btn.dataset.dir;
+    renderEigenPopup();
+  });
+  eigenViewBody.appendChild(subTabDiv);
+
+  // ── Subsample vertices for rows ─────────────────────────────────────────────
+  const DISP   = Math.min(N, 20);
+  const stride = Math.ceil(N / DISP);
+  const vertIdx = [];
+  for (let i = 0; i < N && vertIdx.length < DISP; i += stride) vertIdx.push(i);
+  const dv = vertIdx.length;
+
+  const cellSz = Math.max(4, Math.min(14, Math.floor(Math.min(300 / count, 260 / dv))));
+
+  // ── Hint ────────────────────────────────────────────────────────────────────
+  const hint = document.createElement('div');
+  hint.className = 'eigen-matrix-hint';
+  if (eigenVecDir === 'y') {
+    hint.textContent = `V_y ∈ ℝ^{${N}×${N}} — out-of-plane (bending, λ ≈ 0)`;
+  } else {
+    hint.textContent = N > DISP || count < N
+      ? `V_${eigenVecDir} ∈ ℝ^{${N}×${N}}  (${dv} verts × ${count} modes)`
+      : `V_${eigenVecDir} ∈ ℝ^{${N}×${N}}`;
+  }
+  eigenViewBody.appendChild(hint);
+
+  // ── Matrix grid ─────────────────────────────────────────────────────────────
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'overflow:auto;margin-bottom:0.55rem';
+
+  const grid = document.createElement('div');
+  grid.style.cssText =
+    `display:grid;grid-template-columns:repeat(${count},${cellSz}px);gap:1px;width:fit-content`;
+
+  for (let vi = 0; vi < dv; vi++) {
+    const vidx = vertIdx[vi];
+    const vj   = Math.floor(vidx / (segs + 1));
+    const vi_  = vidx % (segs + 1);
+
+    for (let mi = 0; mi < count; mi++) {
+      const { kx, ky } = topModes[mi];
+      let v = 0;
+      if (eigenVecDir === 'x') {
+        // In-plane horizontal: kx drives column oscillation, ky drives row oscillation
+        v = Math.sin(kx * Math.PI * (vi_ + 1) / (segs + 2)) *
+            Math.sin(ky * Math.PI * (vj  + 1) / (segs + 2));
+      } else if (eigenVecDir === 'z') {
+        // In-plane depth: axes swapped — ky drives column, kx drives row
+        v = Math.sin(ky * Math.PI * (vi_ + 1) / (segs + 2)) *
+            Math.sin(kx * Math.PI * (vj  + 1) / (segs + 2));
+      }
+      // y: v = 0 → neutral mid-colour (bending stiffness not modelled)
+
+      const t = (v + 1) / 2;
+      const [r,g,b] = eigenColorRGB(t);
+      const cell = document.createElement('div');
+      cell.style.cssText =
+        `width:${cellSz}px;height:${cellSz}px;background:rgb(${r},${g},${b})`;
+      cell.title = `V_${eigenVecDir}[${vidx}, ${mi + 1}] = ${v.toFixed(3)}  (${kx},${ky})`;
+      grid.appendChild(cell);
+    }
+  }
+
+  wrap.appendChild(grid);
+  eigenViewBody.appendChild(wrap);
+
+  // ── Legend / note ───────────────────────────────────────────────────────────
+  const legDiv = document.createElement('div');
+  legDiv.style.cssText = 'display:flex;align-items:center;gap:0.4rem;margin-bottom:0.55rem';
+  if (eigenVecDir === 'y') {
+    legDiv.innerHTML =
+      `<span style="font-size:0.6rem;color:var(--nord4)">` +
+      `No bending stiffness — all Y modes degenerate at λ ≈ 0</span>`;
+  } else {
+    legDiv.innerHTML =
+      `<span style="font-size:0.6rem;color:var(--nord4);white-space:nowrap">−1</span>` +
+      `<div style="flex:1;height:6px;border-radius:3px;` +
+      `background:linear-gradient(to right,${eigenColor(0)},${eigenColor(0.5)},${eigenColor(1)})"></div>` +
+      `<span style="font-size:0.6rem;color:var(--nord4);white-space:nowrap">+1</span>`;
+  }
+  eigenViewBody.appendChild(legDiv);
+
+  const dirDesc = {
+    x: 'In-plane horizontal · horizontal + diagonal springs',
+    y: 'Out-of-plane (gravity axis) · zero spring stiffness',
+    z: 'In-plane depth · vertical + diagonal springs',
+  };
+  eigenPopupMeta.innerHTML =
+    `${dirDesc[eigenVecDir]}<br>` +
+    `rows: ${dv} vertices &nbsp;·&nbsp; cols: ${count} modes (↑ λ)`;
+}
+
+function renderEigenvalueView() {
+  const segs  = resolution;
+  const count = eigenValues.length;
+  if (!count) return;
+  const topModes = build2DModes(segs, count);
+  const maxLam   = topModes[topModes.length - 1].lam || 1;
+
+  const hint = document.createElement('div');
+  hint.className = 'eigen-matrix-hint';
+  hint.textContent = `λ_k ≈ 4s·(sin²(kxπ/2N) + sin²(kyπ/2N))`;
+  eigenViewBody.appendChild(hint);
+
+  const list = document.createElement('div');
+  list.style.cssText = 'display:flex;flex-direction:column;gap:2px;margin-bottom:0.55rem';
+
+  topModes.forEach(({ kx, ky, lam }, i) => {
+    const t = lam / maxLam;
+    const [r,g,b] = eigenColorRGB(t);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:0.65rem';
+    row.innerHTML =
+      `<span style="color:var(--nord4);min-width:18px;text-align:right;flex-shrink:0">${i + 1}</span>` +
+      `<span style="color:var(--nord4);min-width:36px;flex-shrink:0;font-size:0.6rem">(${kx},${ky})</span>` +
+      `<div style="flex:1;height:8px;border-radius:2px;background:rgb(${r},${g},${b})"></div>` +
+      `<span style="color:var(--nord8);min-width:40px;text-align:right;flex-shrink:0">${fmtLambda(lam)}</span>`;
+    list.appendChild(row);
+  });
+  eigenViewBody.appendChild(list);
+
+  eigenPopupMeta.innerHTML =
+    `s=${guiParams.stiffness} &nbsp;·&nbsp; N=${segs + 1} per axis &nbsp;·&nbsp; ${count} modes<br>` +
+    `κ = λ<sub>max</sub>/λ<sub>min</sub> = ${(maxLam / (topModes[0].lam || 1)).toFixed(1)}`;
+}
+
+function renderSpectrumView() {
+  const segs  = resolution;
+  const count = eigenValues.length;
+  if (!count) return;
+  const max = Math.max(...eigenValues, 1);
+
+  const barW = Math.max(14, Math.min(22, Math.floor(260 / count)));
+
+  const hint = document.createElement('div');
+  hint.className = 'eigen-matrix-hint';
+  hint.textContent = `Λ = diag(λ₁, …, λ${count})`;
+  eigenViewBody.appendChild(hint);
+
+  const chart = document.createElement('div');
+  chart.style.cssText = 'display:flex;align-items:flex-end;gap:3px;height:80px;margin-bottom:0.35rem';
+
+  eigenValues.forEach((v, i) => {
+    const t = v / max;
+    const [r,g,b] = eigenColorRGB(t);
+    const h = Math.max(3, t * 76);
+    const bar = document.createElement('div');
+    bar.style.cssText =
+      `flex:1;background:rgb(${r},${g},${b});border-radius:2px 2px 0 0;height:${h}px;` +
+      `min-height:3px;cursor:default;position:relative;overflow:hidden`;
+    bar.title = `λ${i + 1} ≈ ${v.toFixed(1)}`;
+    if (barW >= 18 && count <= 14) {
+      const lbl = document.createElement('span');
+      lbl.style.cssText =
+        `position:absolute;top:2px;left:0;right:0;text-align:center;` +
+        `font-size:6px;color:${contrastColor(r,g,b)};font-weight:600;line-height:1`;
+      lbl.textContent = fmtLambda(v);
+      bar.appendChild(lbl);
+    }
+    chart.appendChild(bar);
+  });
+  eigenViewBody.appendChild(chart);
+
+  const xAxis = document.createElement('div');
+  xAxis.style.cssText = 'display:flex;justify-content:space-between;margin-bottom:0.55rem';
+  xAxis.innerHTML =
+    `<span style="font-size:0.58rem;color:var(--nord4)">k=1</span>` +
+    `<span style="font-size:0.58rem;color:var(--nord4)">k=${count}</span>`;
+  eigenViewBody.appendChild(xAxis);
+
+  eigenPopupMeta.innerHTML =
+    `λ<sub>k</sub> ≈ 4s·sin²(kπ/2N) &nbsp;·&nbsp; s=${guiParams.stiffness} &nbsp;·&nbsp; N=${segs + 1}<br>` +
+    `λ<sub>min</sub>=${fmtLambda(eigenValues[0])} &nbsp;·&nbsp; λ<sub>max</sub>=${fmtLambda(eigenValues[count - 1])}`;
+}
+
+openEigen.addEventListener('click', () => {
+  eigenPopup.hidden = !eigenPopup.hidden;
+  openEigen.classList.toggle('active', !eigenPopup.hidden);
+  if (!eigenPopup.hidden) {
+    if (!eigenPopup.dataset.positioned) {
+      eigenPopup.dataset.positioned = '1';
+      const btnRect = openEigen.getBoundingClientRect();
+      const initH = Math.round(Math.min(520, Math.max(360, window.innerHeight * 0.45)));
+      eigenPopup.style.left = `${Math.max(8, btnRect.left)}px`;
+      eigenPopup.style.top  = `${Math.max(8, btnRect.top - initH - 12)}px`;
+    }
+    renderEigenPopup();
+  }
+});
+closeEigen.addEventListener('click', () => {
+  eigenPopup.hidden = true;
+  openEigen.classList.remove('active');
+});
+
+// Drag-to-move via header
+let eigenDrag = null;
+eigenPopup.querySelector('.eigen-popup-header').addEventListener('mousedown', e => {
+  if (e.target.closest('button')) return;
+  const rect = eigenPopup.getBoundingClientRect();
+  eigenDrag = { ox: e.clientX - rect.left, oy: e.clientY - rect.top };
+  e.preventDefault();
+});
+document.addEventListener('mousemove', e => {
+  if (!eigenDrag) return;
+  eigenPopup.style.left = `${Math.max(0, Math.min(window.innerWidth  - 60, e.clientX - eigenDrag.ox))}px`;
+  eigenPopup.style.top  = `${Math.max(0, Math.min(window.innerHeight - 60, e.clientY - eigenDrag.oy))}px`;
+});
+document.addEventListener('mouseup', () => { eigenDrag = null; });
+
+document.getElementById('eigen-tabs').addEventListener('click', e => {
+  const tab = e.target.closest('.etab[data-etab]');
+  if (!tab) return;
+  eigenView = tab.dataset.etab;
+  eigenPopup.querySelectorAll('.etab').forEach(t => t.classList.toggle('active', t === tab));
+  renderEigenPopup();
 });
 
 // ── Resize ────────────────────────────────────────────────────────────────────
