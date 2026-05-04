@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import GUI from 'lil-gui';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
@@ -89,10 +92,12 @@ const PRESETS = {
 };
 
 const guiParams = {
-  stiffness:  PRESETS.soft.stiffness,
-  mass:       1.0,
-  damping:    PRESETS.soft.damping,
-  shearRatio: 0.6,
+  stiffness:     PRESETS.soft.stiffness,
+  mass:          1.0,
+  damping:       PRESETS.soft.damping,
+  shearRatio:    0.6,
+  showWireframe: true,
+  flatShading:   false,
 };
 
 let resolution   = 1;        // segments per axis
@@ -107,6 +112,11 @@ let prevPos      = null;
 let pinned       = null;   // Boolean[]
 let clothGeo     = null;
 let clothMesh    = null;
+let wireLine     = null;   // LineSegments2 fat wireframe
+let wireGeo      = null;
+let lineMat      = null;
+let wireEdges    = null;   // Int32Array of edge index pairs [a,b, a,b, ...]
+let wirePos      = null;   // Float32Array fed to LineSegmentsGeometry
 let N            = 0;      // (res+1)^2 vertices
 let eigenValues  = [];     // synthetic top-10 eigenvalue magnitudes
 
@@ -169,21 +179,40 @@ function buildCloth(res) {
   const clothMat = new THREE.MeshStandardMaterial({
     color: 0x88C0D0,   // Nord8 ice-blue
     side: THREE.DoubleSide,
-    roughness: 0.55,
-    metalness: 0.05,
+    roughness:   0.55,
+    metalness:   0.05,
+    flatShading: guiParams.flatShading,
   });
 
   clothMesh = new THREE.Mesh(clothGeo, clothMat);
   clothMesh.castShadow = true;
   scene.add(clothMesh);
 
-  const wireMat = new THREE.MeshBasicMaterial({
-    color: 0xBF616A,
-    wireframe: true,
-    transparent: true,
-    opacity: 0.35,
-  });
-  clothMesh.add(new THREE.Mesh(clothGeo, wireMat));
+  // Fat wireframe via LineSegments2 (WebGL linewidth is capped at 1px otherwise)
+  if (wireLine) { scene.remove(wireLine); wireGeo.dispose(); lineMat.dispose(); }
+
+  const edgeSet = new Set();
+  const edgePairs = [];
+  for (let i = 0; i < indices.length; i += 3) {
+    const tri = [indices[i], indices[i+1], indices[i+2]];
+    for (let e = 0; e < 3; e++) {
+      const u = tri[e], v = tri[(e+1) % 3];
+      const key = u < v ? `${u},${v}` : `${v},${u}`;
+      if (!edgeSet.has(key)) { edgeSet.add(key); edgePairs.push(u, v); }
+    }
+  }
+  wireEdges = new Int32Array(edgePairs);
+  wirePos   = new Float32Array(edgePairs.length * 3);
+
+  wireGeo = new LineSegmentsGeometry();
+  lineMat = new LineMaterial({ color: 0xBF616A, linewidth: 2, transparent: true, opacity: 0.5 });
+  const vp = document.getElementById('viewport');
+  lineMat.resolution.set(vp.clientWidth, vp.clientHeight);
+
+  wireLine = new LineSegments2(wireGeo, lineMat);
+  wireLine.visible = guiParams.showWireframe;
+  scene.add(wireLine);
+  updateWirePositions();
 
   simState = 'idle';
   updateEigenSpectrum();
@@ -283,6 +312,7 @@ function stepSimulation(dt) {
 
   clothGeo.attributes.position.needsUpdate = true;
   clothGeo.computeVertexNormals();
+  updateWirePositions();
 
   if (useHeatmap) updateHeatmap();
 
@@ -334,6 +364,18 @@ function solveSpring(a, b, rest, k, dt) {
   const cx = dx * delta, cy = dy * delta, cz = dz * delta;
   if (!pinned[a]) { positions[ax] += cx; positions[ay] += cy; positions[az] += cz; }
   if (!pinned[b]) { positions[bx] -= cx; positions[by] -= cy; positions[bz] -= cz; }
+}
+
+// ── Wire positions ────────────────────────────────────────────────────────────
+function updateWirePositions() {
+  if (!wireEdges || !wireGeo) return;
+  const ep = wireEdges, wp = wirePos;
+  for (let i = 0, n = ep.length; i < n; i += 2) {
+    const a = ep[i] * 3, b = ep[i+1] * 3, j = (i >> 1) * 6;
+    wp[j]   = positions[a];   wp[j+1] = positions[a+1]; wp[j+2] = positions[a+2];
+    wp[j+3] = positions[b];   wp[j+4] = positions[b+1]; wp[j+5] = positions[b+2];
+  }
+  wireGeo.setPositions(wp);
 }
 
 // ── Heatmap ───────────────────────────────────────────────────────────────────
@@ -419,6 +461,14 @@ gui.add(guiParams, 'stiffness', 50, 2000, 10).name('K (Stiffness)').onChange(upd
 gui.add(guiParams, 'mass',       0.1, 5,    0.1).name('Mass');
 gui.add(guiParams, 'damping',   0.85, 0.999, 0.001).name('Damping');
 gui.add(guiParams, 'shearRatio', 0,   1,    0.01).name('Shear Ratio');
+gui.add(guiParams, 'showWireframe').name('Wireframe').onChange(v => {
+  if (wireLine) wireLine.visible = v;
+});
+gui.add(guiParams, 'flatShading').name('Flat Shading').onChange(v => {
+  if (!clothMesh) return;
+  clothMesh.material.flatShading = v;
+  clothMesh.material.needsUpdate = true;
+});
 gui.add({ reset() {
   guiParams.stiffness  = PRESETS.soft.stiffness;
   guiParams.mass       = 1.0;
@@ -560,6 +610,7 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  if (lineMat) lineMat.resolution.set(w, h);
 }
 window.addEventListener('resize', resize);
 resize();
