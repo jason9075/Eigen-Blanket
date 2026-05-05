@@ -593,6 +593,9 @@ heatmapToggle.addEventListener('change', () => {
 const MODAL_COPY = {
   en: `
     <p>This simulation uses <strong>Verlet integration</strong> to evolve cloth particle positions over time under gravity and spring constraints.</p>
+    <p>In semi-discrete form, the cloth dynamics can be summarized by the second-order equation of motion:</p>
+    <p>$$M\\ddot{\\mathbf{x}} + C\\dot{\\mathbf{x}} + K\\mathbf{x} = \\mathbf{f}_{ext}$$</p>
+    <p>Here $M$ is the mass matrix, $C$ is the damping matrix, $K$ is the stiffness matrix, and $\\mathbf{f}_{ext}$ contains external forces such as gravity and collision response. This demo approximates that model with Verlet position updates plus iterative spring constraints.</p>
     <p>Each particle $i$ at position $\\mathbf{x}_i$ is updated as:</p>
     <p>$$\\mathbf{x}_i^{t+\\Delta t} = 2\\mathbf{x}_i^t - \\mathbf{x}_i^{t-\\Delta t} + \\mathbf{a}_i\\,\\Delta t^2$$</p>
     <p>Spring forces between neighbouring particles enforce structural rigidity. Two particles $i$ and $j$ with rest length $L_0$ have a corrective displacement:</p>
@@ -650,6 +653,9 @@ pos  += vel + grav                  // Verlet update</code></pre>
   `,
   zhTW: `
     <p>這個模擬使用 <strong>Verlet 積分法</strong> 在重力與彈簧約束下推進布料粒子的位置。</p>
+    <p>若以半離散形式描述，布料動力學可總結為以下二階運動方程式：</p>
+    <p>$$M\\ddot{\\mathbf{x}} + C\\dot{\\mathbf{x}} + K\\mathbf{x} = \\mathbf{f}_{ext}$$</p>
+    <p>其中 $M$ 是質量矩陣（Mass matrix）、$C$ 是阻尼矩陣（Damping matrix）、$K$ 是剛度矩陣（Stiffness matrix），$\\mathbf{f}_{ext}$ 則包含重力與碰撞反應等外力。這個 demo 在實作上以 Verlet 位置更新搭配反覆彈簧約束，近似這個連續模型。</p>
     <p>每個粒子 $i$ 在位置 $\\mathbf{x}_i$ 的更新公式為：</p>
     <p>$$\\mathbf{x}_i^{t+\\Delta t} = 2\\mathbf{x}_i^t - \\mathbf{x}_i^{t-\\Delta t} + \\mathbf{a}_i\\,\\Delta t^2$$</p>
     <p>相鄰粒子之間的彈簧力確保布料結構的剛性。靜止長度為 $L_0$ 的粒子對 $(i,j)$ 的位移修正量為：</p>
