@@ -106,12 +106,11 @@ const guiParams = {
   mass:          1.0,
   damping:       PRESETS.soft.damping,
   shearRatio:    0.6,
-  pulse:         0.003,
+  pulse:         0.15,
   showWireframe: true,
   flatShading:   false,
 };
 
-let simTime = 0;   // accumulated falling time (seconds), drives pulse phase
 
 let resolution   = 1;        // segments per axis
 let preset       = 'soft';
@@ -235,8 +234,9 @@ function buildCloth(res) {
   scene.add(wireLine);
   updateWirePositions();
 
-  simState = 'idle';
-  simTime  = 0;
+  simState    = 'idle';
+  verletFrame = 0;
+  verletSnap  = null;
   updateEigenSpectrum();
   updateStats();
   updateStatusBar('Idle');
@@ -266,14 +266,7 @@ function stepSimulation(dt) {
   const { stiffness, damping, shearRatio } = guiParams;
   const restLen = CLOTH_SIZE / segs;
   // Use a fixed physics dt so gravity feels consistent regardless of frame rate
-  const dtClamped = Math.min(dt, 0.025);
-  const subDt = dtClamped / SUBSTEPS;
-
-  // Accumulate sim time and derive per-substep pulse kick (2 Hz sine, Y-axis only)
-  simTime += dtClamped;
-  const pulseY = guiParams.pulse > 0
-    ? Math.sin(simTime * Math.PI * 4) * guiParams.pulse / SUBSTEPS
-    : 0;
+  const subDt = Math.min(dt, 0.025) / SUBSTEPS;
 
   // Snapshot mean Y before this frame for settled detection
   let meanY0 = 0;
@@ -293,7 +286,7 @@ function stepSimulation(dt) {
       prevPos[iz] = positions[iz];
       positions[ix] += vx;
       // Gravity integrated as velocity increment per subDt (not dt²) for stability
-      positions[iy] += vy + GRAVITY * subDt * subDt + pulseY;
+      positions[iy] += vy + GRAVITY * subDt * subDt;
       positions[iz] += vz;
     }
 
@@ -368,7 +361,6 @@ function stepSimulation(dt) {
   if (meanY1 < CLOTH_Y0 - 1.0 && Math.abs(meanY1 - meanY0) < 0.00015) {
     simState = 'settled';
     updateStatusBar('Settled');
-    updateDropBtn();
   }
 }
 
@@ -507,7 +499,7 @@ gui.add(guiParams, 'stiffness', 50, 2000, 10).name('K (Stiffness)').onChange(upd
 gui.add(guiParams, 'mass',       0.1, 5,    0.1).name('Mass');
 gui.add(guiParams, 'damping',   0.85, 0.999, 0.001).name('Damping');
 gui.add(guiParams, 'shearRatio', 0,   1,    0.01).name('Shear Ratio');
-gui.add(guiParams, 'pulse',      0,   0.2,  0.002).name('Pulse Amp');
+gui.add(guiParams, 'pulse',      0,   0.3,  0.01).name('Pulse Amp');
 gui.add(guiParams, 'showWireframe').name('Wireframe').onChange(v => {
   if (wireLine) wireLine.visible = v;
 });
@@ -521,7 +513,7 @@ gui.add({ reset() {
   guiParams.mass       = 1.0;
   guiParams.damping    = PRESETS.soft.damping;
   guiParams.shearRatio = 0.6;
-  guiParams.pulse      = 0.003;
+  guiParams.pulse      = 0.15;
   gui.controllersRecursive().forEach(c => c.updateDisplay());
   updateEigenSpectrum();
 }}, 'reset').name('Reset to Default');
@@ -570,14 +562,14 @@ btnJitter.addEventListener('click', () => {
   if (!positions) return;
   simState = 'falling';
   updateDropBtn();
-  // Impulse: push sphere up slightly, ripple cloth
-  sphere.position.y += 0.35;
+  const amp = guiParams.pulse;
+  sphere.position.y += amp * 1.4;
   setTimeout(() => { sphere.position.y = SPHERE_RADIUS; }, 120);
   for (let i = 0; i < N; i++) {
     if (!pinned[i]) {
-      positions[i*3+1] += (Math.random() - 0.3) * 0.25;
-      positions[i*3+0] += (Math.random() - 0.5) * 0.05;
-      positions[i*3+2] += (Math.random() - 0.5) * 0.05;
+      positions[i*3+1] += (Math.random() - 0.3) * amp;
+      positions[i*3+0] += (Math.random() - 0.5) * amp * 0.2;
+      positions[i*3+2] += (Math.random() - 0.5) * amp * 0.2;
     }
   }
   updateStatusBar('Jitter!');
@@ -1315,8 +1307,10 @@ function animate(now = 0) {
 
   if (framePrevPos && simState === 'falling') framePrevPos.set(positions);
   stepSimulation(dt);
-  captureVerletSnapshot(dt);
-  if (!verletPopup.hidden) renderVerletPopup();
+  if (simState === 'falling') {
+    captureVerletSnapshot(dt);
+    if (!verletPopup.hidden) renderVerletPopup();
+  }
   updateFps(now);
   controls.update();
   renderer.render(scene, camera);
